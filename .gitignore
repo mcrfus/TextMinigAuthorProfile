@@ -1,0 +1,556 @@
+import json
+from pprint import pprint
+
+import re
+
+import os
+os.environ["PYSPARK_PYTHON"] = "python3"
+
+import collections
+from collections import Counter
+
+import os.path
+from pyspark import SparkContext
+
+from pyspark.sql import Row
+
+from nltk.corpus import stopwords
+
+from sklearn.svm import SVC
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+
+fileNameTRN = os.path.join('hispatweets', 'training.txt')
+fileNameTST = os.path.join('hispatweets', 'test.txt')
+
+
+sc = SparkContext(appName="tweets")
+
+hispatweetsTRNRDD = (sc.textFile(fileNameTRN).map(lambda x: x.split(":::")))
+usuariosTRN = hispatweetsTRNRDD.map(lambda p: Row(usuario=p[0], pais=p[1], sexo=p[2]))
+
+
+hispatweetsTSTRDD = (sc.textFile(fileNameTST).map(lambda x: x.split(":::")))
+usuariosTST = hispatweetsTSTRDD.map(lambda p: Row(usuario=p[0], pais=p[1], sexo=p[2]))
+
+###############################################################
+def crearbagwords(sexo, pais, usuario, bolsa, usuarios):
+    if sexo != '':
+        selecc1 = usuarios.filter(lambda x: (x.sexo==sexo))
+    else:
+        selecc1 = usuarios
+    if pais != '':
+        selecc2 = selecc1.filter(lambda x: (x.pais==pais))
+    else:
+        selecc2 = selecc1
+    if usuario != '':
+        selecc3 = selecc2.filter(lambda x: (x.usuario==usuario))
+    else:
+        selecc3 = selecc2
+
+
+    f=open(bolsa + ".txt","w")
+
+    for h in selecc3.collect():
+        f2=open("hispatweetsvalidos/" + h.pais + "/" + h.usuario + ".txt","w")
+
+        fichero = os.path.join('hispatweets', h.pais, h.usuario + '.json')
+        #el fichero 'venezuela', '527587165.json' no casca porque no tiene emoticones
+        #fichero = os.path.join('hispatweets', 'venezuela', '527587165.json')
+        #print(fichero)
+        infile = open(fichero, 'r')
+        for line in infile:
+            #print(line)
+            data = json.loads(line)
+            texto = data["text"]
+            textolee= re.sub("[^a-zA-Z]", " ", texto).lower()
+            f2.write(texto + '\n')
+            palabras=textolee.split()
+            palabras=[w for w in palabras if not w in stopwords.words('spanish')]
+            for word in palabras:
+                if len(word) > 2:
+                    f.write(word + '\n')
+        f2.close()
+    f.close()
+
+
+
+###############################################################
+def crearbagwordstxt(sexo, pais, usuario, bolsa, usuarios):
+    if sexo != '':
+        selecc1 = usuarios.filter(lambda x: (x.sexo==sexo))
+    else:
+        selecc1 = usuarios
+    if pais != '':
+        selecc2 = selecc1.filter(lambda x: (x.pais==pais))
+    else:
+        selecc2 = selecc1
+    if usuario != '':
+        selecc3 = selecc2.filter(lambda x: (x.usuario==usuario))
+    else:
+        selecc3 = selecc2
+
+    f=open(bolsa + ".txt","w")
+
+    for h in selecc3.collect():
+        fichero = os.path.join('hispatweetsvalidos', h.pais, h.usuario + '.txt')
+        infile = open(fichero, 'r')
+        for line in infile:
+            #print(line)
+            #data = json.loads(line)
+            #print(line)
+            #print("aqui")
+            #exit()
+            #texto = data["text"]
+            texto=line
+            textolee= re.sub("[^a-zA-Z]", " ", texto).lower()
+            palabras=textolee.split()
+            palabras=[w for w in palabras if not w in stopwords.words('spanish')]
+            for word in palabras:
+                if len(word) > 2:
+                    f.write(word + '\n')
+    f.close()
+###############################################################
+
+def crearbagwordsmasusada(bolsa,npalabras):
+    fileN = os.path.join('bags', bolsa + ".txt")
+    print(fileN)
+    bolsaRDD = sc.textFile(fileN).collect()
+
+    c = Counter(bolsaRDD).most_common(npalabras)
+    c.sort()
+
+    f=open("bags/"+bolsa+"-freq.txt","w")
+
+    bolsausada=[]
+    for palabra in c:
+        texto = palabra[0] + "\t" + str(palabra[1])
+        f.write(texto + '\n')
+        bolsausada.append(palabra[0])
+    f.close()
+    return bolsausada
+
+def crearbagpais(pais):
+
+    #crearbagwords("male",pais,"","bags/"+pais+"-hombre",usuariosTRN)
+    #print("bolsa hombre ",pais,"creada")
+    #crearbagwords("female",pais,"","bags/"+pais+"-mujer",usuariosTRN)
+    #print("bolsa mujer ",pais,"creada")
+    #crearbagwords("UNKNOWN",pais,"","bags/"+pais+"-unknown",usuariosTRN)
+    #print("bolsa unknown ",pais,"creada")
+
+    crearbagwordstxt("",pais,"","bags/"+pais,usuariosTRN)
+    print("bolsa ",pais,"creada")
+
+def crearmatrizvector(nombrefich):
+
+    fichero = os.path.join('hispatweets', nombrefich+'.txt')
+    hispaRDD = (sc.textFile(fichero).map(lambda x: x.split(":::")))
+    usuario = hispaRDD.map(lambda p: Row(usuario=p[0], pais=p[1], sexo=p[2]))
+
+
+
+    matriz=[]
+    vectorsexo=[]
+    vectorpais=[]
+
+    for h in usuario.collect():
+        #fichero = os.path.join('hispatweets', h.pais, h.usuario + '.json')
+        fichero = os.path.join('hispatweetsvalidos', h.pais, h.usuario + '.txt')
+
+        vectoraux=[]
+        for j in range(len(vectorbolsa)):
+            vectoraux.append(0)
+
+        totalpalabrasuser=0
+        #esto hay que quitarlo cuando esten todos
+        #if h.pais == "argentina":
+        if h.pais != "":
+
+            infile = open(fichero, 'r')
+            for line in infile:
+                #data = json.loads(line)
+                #texto = data["text"]
+                texto=line
+                textolee= re.sub("[^a-zA-Z]", " ", texto).lower()
+                palabras=textolee.split()
+                palabras=[w for w in palabras if not w in stopwords.words('spanish')]
+                #totalpalabrasuser=totalpalabrasuser+len(palabras)
+                for word in palabras:
+                    totalpalabrasuser=totalpalabrasuser+1
+                    if len(word) > 2:
+                        #recorremos la bolsa de palabras para ver si esta palabra esta
+                        for j in range(len(vectorbolsa)):
+                            if vectorbolsa[j]==word:
+                                vectoraux[j]=vectoraux[j]+1
+                                break
+        #aqui lo que hacemos es dividr los totales de las palabras de un usuario por las palabras totales de ese usuario
+        for k in range(len(vectoraux)):
+            if vectoraux[k]>0:
+                #vectoraux[k]=vectoraux[k]/totalpalabrasuser
+                vectoraux[k]=1
+        matriz.append(vectoraux)
+        vectorsexo.append(h.sexo)
+        vectorpais.append(h.pais)
+    return matriz,vectorsexo,vectorpais
+
+
+def crearbagtotal():
+    print("entra")
+    f=open("bags/bolsa.txt","w")
+
+    infile = open('bags/argentina.txt','r')
+    for word in infile:
+            f.write(word)
+    infile.close()
+    print("argentina")
+
+    infile = open('bags/chile.txt','r')
+    for word in infile:
+            f.write(word)
+    infile.close()
+    print("chile")
+
+
+    infile = open('bags/colombia.txt','r')
+    for word in infile:
+            f.write(word)
+    infile.close()
+    print("colombia")
+
+    infile = open('bags/espana.txt','r')
+    for word in infile:
+            f.write(word)
+    infile.close()
+    print("espana")
+
+    infile = open('bags/mexico.txt','r')
+    for word in infile:
+            f.write(word)
+    infile.close()
+    print("mexico")
+
+
+    infile = open('bags/peru.txt','r')
+    for word in infile:
+            f.write(word)
+    infile.close()
+    print("peru")
+
+
+    infile = open('bags/venezuela.txt','r')
+    for word in infile:
+            f.write(word)
+    infile.close()
+    print("venezuela")
+
+    f.close()
+
+
+
+def crearbagfreqtotal():
+    print("entra")
+    f=open("bags/bolsafreq.txt","w")
+
+    infile = open('bags/argentina-freq.txt','r')
+    for line in infile:
+            word=line.split()
+            f.write(word[0]+ "\n")
+    infile.close()
+    print("argentina")
+
+    infile = open('bags/chile-freq.txt','r')
+    for line in infile:
+            word=line.split()
+            f.write(word[0]+ "\n")
+    infile.close()
+    print("chile")
+
+
+    infile = open('bags/colombia-freq.txt','r')
+    for line in infile:
+            word=line.split()
+            f.write(word[0]+ "\n")
+    infile.close()
+    print("colombia")
+
+    infile = open('bags/espana-freq.txt','r')
+    for line in infile:
+            word=line.split()
+            f.write(word[0]+ "\n")
+    infile.close()
+    print("espana")
+
+    infile = open('bags/mexico-freq.txt','r')
+    for line in infile:
+            word=line.split()
+            f.write(word[0]+ "\n")
+    infile.close()
+    print("mexico")
+
+
+    infile = open('bags/peru-freq.txt','r')
+    for line in infile:
+            word=line.split()
+            f.write(word[0]+ "\n")
+    infile.close()
+    print("peru")
+
+
+    infile = open('bags/venezuela-freq.txt','r')
+    for line in infile:
+            word=line.split()
+            f.write(word[0]+ "\n")
+    infile.close()
+    print("venezuela")
+
+    f.close()
+
+
+
+def compararvectores(vector1,vector2):
+    datos=0
+    aciertos=0
+    if len(vector1)==len(vector2):
+        datos=len(vector1)
+        for i in range(len(vector1)):
+            if vector1[i]==vector2[2]:
+                aciertos=aciertos+1
+
+    return datos,aciertos
+
+
+
+
+def grabarvector(vector,nombre):
+    f=open("bags/"+nombre+".txt","w")
+
+    word=""
+
+    for j in range(len(vector)):
+        word=word + vector[j] + "\t"
+    word=word + "\n"
+
+    f.write(word)
+
+    f.close()
+
+
+def grabarmatriz(vector,nombre):
+    f=open("bags/"+nombre+".txt","w")
+
+    vec=[]
+
+    for j in range(len(vector)):
+        word=""
+        vec=vector[j]
+        for k in range(len(vec)):
+            word=word + str(vec[k]) + "\t"
+        #word = vector[j]
+        word=word + "\n"
+
+        f.write(word)
+
+    f.close()
+
+
+###############################################################
+#para crear la bolsa de un tweet en concreto de uno de los ficheros
+
+#crearbagwords("male", "venezuela", "14357773", "bags/hombre-venezuela")
+
+
+###############################################################
+# creamos txt con los textos de los tweets para cada usuario
+# esto lo hacemos por cuestion de espacio, los json ocupan mucho y no caben en la mv
+#pais="venezuela"
+#crearbagwords("",pais,"","bags/"+pais,usuariosTRN)
+#crearbagwords("",pais,"","bags/"+pais,usuariosTST)
+
+#pais="mexico"
+#crearbagwords("",pais,"","bags/"+pais,usuariosTRN)
+#crearbagwords("",pais,"","bags/"+pais,usuariosTST)
+
+#exit()
+
+
+###############################################################
+# para crear las bolsas de palabras de cada pais
+# creamos una bolsa por pais y genero
+# luego segun queramos sacar una predicción u otra usaremos unos ficheros u otros
+
+#crearbagpais("argentina")
+#crearbagpais("chile")
+#crearbagpais("colombia")
+#crearbagpais("espana")
+#crearbagpais("mexico")
+#crearbagpais("peru")
+#crearbagpais("venezuela")
+#exit()
+
+
+###############################################################
+# creamos una bolsa con todas las palabras de todos los tweets de todos los usuarios
+
+#crearbagtotal()
+#exit()
+
+###############################################################
+# ahora vamos a leer la bolsa global creada
+# y quedarnos con las 1000 mas usadas
+
+#vectorbolsa=crearbagwordsmasusada("argentina",1000)
+#vectorbolsa=crearbagwordsmasusada("chile",1000)
+#vectorbolsa=crearbagwordsmasusada("colombia",1000)
+#vectorbolsa=crearbagwordsmasusada("espana",1000)
+#vectorbolsa=crearbagwordsmasusada("mexico",1000)
+#vectorbolsa=crearbagwordsmasusada("peru",1000)
+#vectorbolsa=crearbagwordsmasusada("venezuela",1000)
+#exit()
+
+
+###############################################################
+# creamos una bolsa con todas las palabras de todos los tweets de todos los usuarios
+
+#crearbagfreqtotal()
+#exit()
+
+###############################################################
+# ahora vamos a leer la bolsa global creada
+# y quedarnos con las 1000 mas usadas
+
+#vectorbolsa=crearbagwordsmasusada("bolsa",1000)
+vectorbolsa=crearbagwordsmasusada("bolsafreq",1000)
+#print(vectorbolsa)
+#exit()
+
+
+###############################################################
+# vamos a leer los tweets de cada usuario del fihero de training
+# y vamos a crear la matriz con linea por usuario segun bolsa general
+# y tambien creamos los vectores de sexo y pais por usuario
+
+matrizTR,vectorsexoTR,vectorpaisTR=crearmatrizvector("training")
+#print("matrizTR",matrizTR)
+#print("vectorsexoTR",vectorsexoTR)
+#print("vectorpaisTR",vectorpaisTR)
+print("CREADA Matriz sexo")
+#exit()
+
+###############################################################
+# vamos a leer los tweets de cada usuario del fihero de test
+# y vamos a crear la matriz con linea por usuario segun bolsa general
+# y tambien creamos los vectores de sexo y pais por usuario
+# estos ultimos vectores los creamos para validar si el modelo es correcto
+
+matrizTS,vectorsexoTS,vectorpaisTS=crearmatrizvector("test")
+#print("matrizTS",matrizTS)
+#print("vectorsexoTS",vectorsexoTS)
+#print("vectorpaisTS",vectorpaisTS)
+print("CREADA Matriz pais")
+#exit()
+
+
+###############################################################
+#######################   SVC    ##############################
+###############################################################
+# entrenamos el modelo para la caracteristica de sexo
+# y lo evauamos
+#modelosexo=SVC()
+#modelosexo.fit(matrizTR,vectorsexoTR)
+#print("ENTRENADO modelo sexo")
+
+#solucionsexo = modelosexo.predict(matrizTS)
+#print("EVALUADO test sexo")
+
+###############################################################
+# entrenamos el modelo para la caracteristica de pais
+# y lo evauamos
+#modelopais=SVC()
+#modelopais.fit(matrizTR,vectorpaisTR)
+#print("ENTRENADO modelo pais")
+
+#solucionpais = modelopais.predict(matrizTS)
+#print("EVALUADO test pais")
+###############################################################
+
+
+
+###############################################################
+######################    NAIVE BAYES  ########################
+###############################################################
+# entrenamos el modelo para la caracteristica de sexo
+# y lo evauamos
+#modelosexo=GaussianNB()
+#modelosexo.fit(matrizTR,vectorsexoTR)
+#print("ENTRENADO modelo sexo")
+
+#solucionsexo = modelosexo.predict(matrizTS)
+#print("EVALUADO test sexo")
+
+###############################################################
+# entrenamos el modelo para la caracteristica de pais
+# y lo evauamos
+#modelopais=GaussianNB()
+#modelopais.fit(matrizTR,vectorpaisTR)
+#print("ENTRENADO modelo pais")
+
+#solucionpais = modelopais.predict(matrizTS)
+#print("EVALUADO test pais")
+###############################################################
+
+
+
+###############################################################
+#################   K NEIGHBORS   #############################
+###############################################################
+# entrenamos el modelo para la caracteristica de sexo
+# y lo evauamos
+modelosexo=KNeighborsClassifier()
+modelosexo.fit(matrizTR,vectorsexoTR)
+print("ENTRENADO modelo sexo")
+
+solucionsexo = modelosexo.predict(matrizTS)
+print("EVALUADO test sexo")
+
+###############################################################
+# entrenamos el modelo para la caracteristica de pais
+# y lo evauamos
+modelopais=KNeighborsClassifier()
+modelopais.fit(matrizTR,vectorpaisTR)
+print("ENTRENADO modelo pais")
+
+solucionpais = modelopais.predict(matrizTS)
+print("EVALUADO test pais")
+###############################################################
+
+
+
+###############################################################
+# comprobamos el % de acierto, para la caracteristica de sexo
+# comparamos vectorsexoTS y solucionsexo
+
+print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+print("vectorsexoTS",vectorsexoTS)
+print("solucionsexo",solucionsexo)
+datos,aciertos=compararvectores(vectorsexoTS,solucionsexo)
+print("Modelo Sexo: de un total de ",datos," hemos predicho correctamente ",aciertos)
+
+
+###############################################################
+# comprobamos el % de acierto, para la caracteristica de pais
+# comparamos vectorpaisTS y solucionpais
+
+print("+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++")
+print("vectorpaisTS",vectorpaisTS)
+print("solucionpais",solucionpais)
+datos,aciertos=compararvectores(vectorpaisTS,solucionpais)
+print("Modelo Pais: de un total de ",datos," hemos predicho correctamente ",aciertos)
+
+print("tamaño matrizTR:",len(matrizTR),"    +++++  tamaño vectorpaisTR: ", len(vectorpaisTR))
+
+grabarmatriz(matrizTR,"matrizTR")
+grabarmatriz(matrizTS,"matrizTS")
+grabarvector(vectorpaisTS,"vectorpaisTR")
+grabarvector(vectorsexoTS,"vectorsexoTR")
+
